@@ -164,7 +164,24 @@ community tools. Ranked by safety:
 
 ---
 
-## 6. Suggested rollout plan
+## 6. Easiest route — one script
+
+`prep-slack-emoji.sh` (in this folder) does steps 1–3 for you: it downloads the
+permissively-licensed **Party Parrot** pack (86 animated GIFs, all already <128KB with
+clean shortcode names), sanitizes filenames, auto-compresses anything oversized (only if
+you add your own files), and produces a ready-to-drag `slack-emoji-upload/` folder.
+**No image tools needed for the default pack.**
+
+```bash
+./prep-slack-emoji.sh                       # download + prep the party parrot pack
+ADD_DIR=~/my-gifs ./prep-slack-emoji.sh     # also fold in your own images
+OUT_DIR=~/Desktop/emoji ./prep-slack-emoji.sh   # choose the output location
+```
+
+Then just install the **Slack Emoji Tools** browser extension, open `/customize/emoji`,
+and drag the folder onto the bulk uploader. Each filename becomes the emoji name.
+
+### Full rollout plan (if hand-picking more packs)
 
 1. **Pick your base set:** download Noto Emoji + Fluent UI + Blobmoji (all permissive).
 2. **Add fun reactions:** grab the core Party Parrots and Blobs animated GIFs.
