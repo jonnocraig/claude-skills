@@ -166,20 +166,39 @@ community tools. Ranked by safety:
 
 ## 6. Easiest route — one script
 
-`prep-slack-emoji.sh` (in this folder) does steps 1–3 for you: it downloads the
-permissively-licensed **Party Parrot** pack (86 animated GIFs, all already <128KB with
-clean shortcode names), sanitizes filenames, auto-compresses anything oversized (only if
-you add your own files), and produces a ready-to-drag `slack-emoji-upload/` folder.
-**No image tools needed for the default pack.**
+Two files in this folder do all the prep:
+- **`prep-slack-emoji.sh`** — downloads packs and builds a ready-to-drag `slack-emoji-upload/` folder.
+- **`emoji_namemap.py`** — maps codepoint filenames (`emoji_u1f600.png`) to real Slack
+  shortcodes (`grinning.png`) using the MIT `iamcal/emoji-data` table (Slack's own naming lineage).
 
 ```bash
-./prep-slack-emoji.sh                       # download + prep the party parrot pack
-ADD_DIR=~/my-gifs ./prep-slack-emoji.sh     # also fold in your own images
-OUT_DIR=~/Desktop/emoji ./prep-slack-emoji.sh   # choose the output location
+./prep-slack-emoji.sh                          # all packs (parrots + noto + blob + fluent)
+PACKS="parrots noto" ./prep-slack-emoji.sh     # pick specific packs
+ADD_DIR=~/my-gifs ./prep-slack-emoji.sh        # also fold in your own images
+OUT_DIR=~/Desktop/emoji ./prep-slack-emoji.sh  # choose the output location
 ```
 
-Then just install the **Slack Emoji Tools** browser extension, open `/customize/emoji`,
-and drag the folder onto the bulk uploader. Each filename becomes the emoji name.
+**Packs available:**
+
+| Pack | Style | Count | Tools needed |
+|------|-------|------:|--------------|
+| `parrots` | Animated party parrots (GIF) | 86 | None |
+| `noto` | Google Noto Emoji — full Unicode set | ~3,500 | None |
+| `blob` | Google "blob" emoji | ~70 | None |
+| `fluent` | Microsoft Fluent UI Emoji | ~3,100 | **SVG rasterizer** (`rsvg-convert`/`inkscape`) — auto-skips with an install hint if missing |
+
+**Important — style prefixes:** general-purpose Unicode emoji *already exist natively in
+Slack*, and Slack won't let a custom emoji override a built-in name. So `noto`/`blob`/`fluent`
+get a prefix (`noto_`, `blob_`, `fluent_`) — you'll type `:noto_pizza:`, `:blob_thumbsup:`,
+`:fluent_rocket:`. The parrots keep their original names (`:coffeeparrot:`). Override a prefix
+with e.g. `NOTO_PREFIX= ` (empty = no prefix, but then most will clash with built-ins and be rejected).
+
+The script also handles **skin-tone variants** (`noto_thumbsup_dark_skin`), de-dupes name
+collisions, keeps everything ≤128KB, auto-compresses oversized GIFs with `gifsicle` if present,
+and writes an `ATTRIBUTION.txt` (don't upload that one).
+
+Then install the **Slack Emoji Tools** browser extension, open `/customize/emoji`, and drag the
+folder onto the bulk uploader (~30–50 at a time). Each filename becomes the emoji name.
 
 ### Full rollout plan (if hand-picking more packs)
 
