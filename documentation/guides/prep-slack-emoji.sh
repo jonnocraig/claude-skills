@@ -6,33 +6,35 @@
 # open-source packs, ready to drag-and-drop via the "Slack Emoji Tools" browser
 # extension (each filename becomes the emoji name).
 #
-# Packs (set PACKS="..." to choose; default = all four):
-#   parrots  Cult of the Party Parrot — 86 animated GIFs. ZERO tools needed.
-#   noto     Google Noto Emoji — full Unicode set, Google style. ZERO tools needed.
-#            Codepoint filenames are mapped to real shortcodes via emoji_namemap.py.
-#   blob     Google "blob" emoji (the beloved deprecated style). ZERO tools needed.
-#   fluent   Microsoft Fluent UI Emoji — modern MS style. NEEDS an SVG rasterizer
-#            (rsvg-convert or inkscape); auto-skips with an install hint if missing.
+# Packs (set PACKS="..." to choose; default = parrots noto blobmoji fluent):
+#   parrots   Cult of the Party Parrot — 86 animated GIFs.            no extra tools
+#   noto      Google Noto Emoji — full Unicode set, Google style.     no extra tools
+#   blob      Google "blob" emoji, ~70 ready PNGs (lightweight).      no extra tools
+#   blobmoji  FULL blob set (~3,700) rasterized from Blobmoji SVGs.   needs cairosvg*
+#   fluent    Microsoft Fluent UI Emoji (~3,100) rasterized.          needs cairosvg*
 #
-# General-purpose emoji already exist NATIVELY in Slack, so noto/blob/fluent get a
-# style PREFIX (noto_, blob_, fluent_) — otherwise Slack rejects names that collide
-# with built-ins. Type :noto_pizza:, :blob_smile:, :fluent_rocket:, :coffeeparrot:.
+#   * cairosvg is auto-installed via pip on first use (no system packages needed).
+#     blob and blobmoji both use the blob_ prefix — pick ONE to avoid duplicates.
+#
+# General-purpose emoji already exist NATIVELY in Slack, so noto/blob/blobmoji/fluent
+# get a style PREFIX (noto_, blob_, fluent_) — otherwise Slack rejects names that
+# collide with built-ins. Type :noto_pizza:, :blob_octopus:, :fluent_rocket:, :coffeeparrot:.
 #
 # Usage:
-#   ./prep-slack-emoji.sh                         # all packs (fluent if rasterizer present)
+#   ./prep-slack-emoji.sh                         # default packs
 #   PACKS="parrots noto" ./prep-slack-emoji.sh    # pick packs
 #   PACKS=noto NOTO_PREFIX= ./prep-slack-emoji.sh # no prefix (will clash with natives!)
 #   ADD_DIR=~/my-gifs ./prep-slack-emoji.sh       # also fold in your own images
 #   OUT_DIR=~/Desktop/emoji ./prep-slack-emoji.sh # change output location
 #
 # License notes: party parrot core gif = unlimited use (some assets CC-BY-SA 4.0);
-# Noto/blob art = Apache-2.0; Fluent = MIT; emoji-data name table = MIT. Attribution
-# for CC-BY-SA assets goes in ATTRIBUTION.txt in the output folder.
+# Noto/blob/Blobmoji art = Apache-2.0; Fluent = MIT; emoji-data name table = MIT.
+# Attribution for CC-BY-SA assets goes in ATTRIBUTION.txt in the output folder.
 
 set -euo pipefail
 
 # ---- config (override via env vars) ----------------------------------------
-PACKS="${PACKS:-parrots noto blob fluent}"
+PACKS="${PACKS:-parrots noto blobmoji fluent}"
 WORK_DIR="${WORK_DIR:-$(pwd)/.slack-emoji-src}"   # cache for cloned packs
 OUT_DIR="${OUT_DIR:-$(pwd)/slack-emoji-upload}"   # the drag-and-drop folder
 ADD_DIR="${ADD_DIR:-}"                            # optional: your own images
@@ -44,6 +46,7 @@ FLUENT_PREFIX="${FLUENT_PREFIX-fluent_}"
 PARROT_REPO="https://github.com/jmhobbs/cultofthepartyparrot.com.git"
 NOTO_REPO="https://github.com/googlefonts/noto-emoji.git"
 BLOB_REPO="https://github.com/tawago/google-emoji-for-slack.git"   # ready blob PNGs
+BLOBMOJI_REPO="https://github.com/C1710/blobmoji.git"             # full blob SVGs
 FLUENT_REPO="https://github.com/microsoft/fluentui-emoji.git"
 EMOJIDATA_REPO="https://github.com/iamcal/emoji-data.git"          # MIT name table
 PARROT_DIRS=(parrots other-parrots guests flags)
@@ -60,7 +63,6 @@ command -v git     >/dev/null || { echo "git is required."; exit 1; }
 command -v python3 >/dev/null || { echo "python3 is required (for name mapping)."; exit 1; }
 [ -f "$MAPPER" ] || { echo "missing $MAPPER (keep it next to this script)."; exit 1; }
 HAVE_GIFSICLE=0; command -v gifsicle >/dev/null && HAVE_GIFSICLE=1
-RASTERIZER=""; for r in rsvg-convert inkscape; do command -v "$r" >/dev/null && { RASTERIZER="$r"; break; }; done
 
 fsize() { stat -c%s "$1" 2>/dev/null || stat -f%z "$1"; }
 
@@ -77,11 +79,20 @@ fetch_repo() {  # <url> <name> [sparse_subdir]
   fi
 }
 
-# the MIT name table, fetched once and reused by every codepoint pack.
+# the MIT name table, fetched once and reused by every pack.
 emoji_json() {
   local j="$WORK_DIR/emoji-data/emoji.json"
-  [ -f "$j" ] || { fetch_repo "$EMOJIDATA_REPO" emoji-data emoji.json; }
+  [ -f "$j" ] || fetch_repo "$EMOJIDATA_REPO" emoji-data emoji.json
   printf '%s' "$j"
+}
+
+# cairosvg = our portable SVG rasterizer; install it on first use (no system pkgs).
+ensure_cairosvg() {
+  python3 -c 'import cairosvg' 2>/dev/null && return 0
+  say "installing cairosvg (one-time, for SVG packs)…"
+  python3 -m pip install --user --quiet cairosvg 2>/dev/null \
+    || python3 -m pip install --quiet cairosvg 2>/dev/null || true
+  python3 -c 'import cairosvg' 2>/dev/null
 }
 
 # copy a GIF to OUT_DIR as <shortcode>.gif, compressing if over the limit.
@@ -108,13 +119,11 @@ emit_gif() {
   fi
 }
 
-# drop any mapped PNGs that ended up over 128KB (rare for these packs).
+# drop/shrink any mapped PNGs that ended up over 128KB (rare at 128px).
 trim_oversized_png() {
   local f
-  find "$OUT_DIR" -name '*.png' -size +128k -print0 2>/dev/null | while IFS= read -r -d '' f; do
-    if command -v pngquant >/dev/null; then
-      pngquant --quality=50-90 --force --output "$f" "$f" 2>/dev/null || true
-    fi
+  find "$OUT_DIR" -type f -name '*.png' -size +128k -print0 2>/dev/null | while IFS= read -r -d '' f; do
+    command -v pngquant >/dev/null && pngquant --quality=50-90 --force --output "$f" "$f" 2>/dev/null || true
     [ "$(fsize "$f")" -gt "$MAX_BYTES" ] && { warn "$(basename "$f") >128KB; removing"; rm -f "$f"; }
   done
 }
@@ -138,8 +147,8 @@ pack_noto() {
     --src "$WORK_DIR/noto/png/128" --out "$OUT_DIR" --prefix "$NOTO_PREFIX"
 }
 
-pack_blob() {
-  say "blob: fetching Google blob emoji + mapping names"
+pack_blob() {  # lightweight, ready-made PNGs, no rasterizer
+  say "blob: fetching Google blob emoji (ready PNGs) + mapping names"
   fetch_repo "$BLOB_REPO" blob
   local tmp="$WORK_DIR/.blob_flat"; rm -rf "$tmp"; mkdir -p "$tmp"
   find "$WORK_DIR/blob" -type f -name 'emoji_u*.png' -exec cp {} "$tmp/" \;
@@ -147,25 +156,30 @@ pack_blob() {
     --src "$tmp" --out "$OUT_DIR" --prefix "$BLOB_PREFIX"
 }
 
-pack_fluent() {
-  if [ -z "$RASTERIZER" ]; then
-    warn "fluent: skipped — needs an SVG rasterizer. Install one and re-run:"
-    warn "        macOS: brew install librsvg   |   Debian/Ubuntu: apt-get install librsvg2-bin"
+pack_blobmoji() {  # full blob set, rasterized from SVG
+  if ! ensure_cairosvg; then
+    warn "blobmoji: skipped — cairosvg unavailable. Install: python3 -m pip install --user cairosvg"
     return
   fi
-  say "fluent: fetching Microsoft Fluent UI Emoji (rasterizing with $RASTERIZER)"
-  fetch_repo "$FLUENT_REPO" fluent assets
-  local tmp="$WORK_DIR/.fluent_cp"; rm -rf "$tmp"; mkdir -p "$tmp" n=0
-  while IFS=$'\t' read -r cp svg; do
-    [ -n "$cp" ] && [ -f "$svg" ] || continue
-    if [ "$RASTERIZER" = "rsvg-convert" ]; then
-      rsvg-convert -w 128 -h 128 "$svg" -o "$tmp/emoji_u${cp}.png" 2>/dev/null || true
-    else
-      inkscape "$svg" --export-type=png -w 128 -h 128 -o "$tmp/emoji_u${cp}.png" >/dev/null 2>&1 || true
-    fi
-  done < <(python3 "$MAPPER" manifest --assets "$WORK_DIR/fluent/assets")
+  say "blobmoji: fetching + rasterizing FULL blob set (~3,700 svg, takes a minute)"
+  fetch_repo "$BLOBMOJI_REPO" blobmoji svg
+  local png="$WORK_DIR/.blobmoji_png"; rm -rf "$png"
+  python3 "$MAPPER" rasterize --svg-dir "$WORK_DIR/blobmoji/svg" --out "$png"
   python3 "$MAPPER" map --emoji-json "$(emoji_json)" \
-    --src "$tmp" --out "$OUT_DIR" --prefix "$FLUENT_PREFIX"
+    --src "$png" --out "$OUT_DIR" --prefix "$BLOB_PREFIX"
+}
+
+pack_fluent() {  # Microsoft Fluent, rasterized from SVG
+  if ! ensure_cairosvg; then
+    warn "fluent: skipped — cairosvg unavailable. Install: python3 -m pip install --user cairosvg"
+    return
+  fi
+  say "fluent: fetching + rasterizing Microsoft Fluent UI (~3,100 svg, takes a minute)"
+  fetch_repo "$FLUENT_REPO" fluent assets
+  local png="$WORK_DIR/.fluent_png"; rm -rf "$png"
+  python3 "$MAPPER" rasterize --fluent-assets "$WORK_DIR/fluent/assets" --out "$png"
+  python3 "$MAPPER" map --emoji-json "$(emoji_json)" \
+    --src "$png" --out "$OUT_DIR" --prefix "$FLUENT_PREFIX"
 }
 
 # ---- run --------------------------------------------------------------------
@@ -174,11 +188,12 @@ rm -rf "$OUT_DIR"; mkdir -p "$OUT_DIR"
 
 for p in $PACKS; do
   case "$p" in
-    parrots) pack_parrots ;;
-    noto)    pack_noto ;;
-    blob)    pack_blob ;;
-    fluent)  pack_fluent ;;
-    *) warn "unknown pack '$p' (valid: parrots noto blob fluent)";;
+    parrots)  pack_parrots ;;
+    noto)     pack_noto ;;
+    blob)     pack_blob ;;
+    blobmoji) pack_blobmoji ;;
+    fluent)   pack_fluent ;;
+    *) warn "unknown pack '$p' (valid: parrots noto blob blobmoji fluent)";;
   esac
 done
 
@@ -196,7 +211,8 @@ cat > "$OUT_DIR/ATTRIBUTION.txt" <<EOF
 Emoji sources & licenses:
   Party Parrot  https://cultofthepartyparrot.com   core gif: unlimited use; some assets CC-BY-SA 4.0
   Noto Emoji    https://github.com/googlefonts/noto-emoji        Apache-2.0
-  Blob emoji    https://github.com/tawago/google-emoji-for-slack Apache-2.0 / Unlicense
+  Blob (lite)   https://github.com/tawago/google-emoji-for-slack Apache-2.0 / Unlicense
+  Blobmoji      https://github.com/C1710/blobmoji                Apache-2.0 (images) / OFL (font)
   Fluent Emoji  https://github.com/microsoft/fluentui-emoji      MIT
   Name table    https://github.com/iamcal/emoji-data             MIT
 Keep this credit where CC-BY-SA / attribution-required assets are used.
@@ -214,7 +230,7 @@ Next steps (the easy bulk-upload route):
   2. Open  https://<yourworkspace>.slack.com/customize/emoji
   3. Drag files from  $OUT_DIR  onto the bulk-uploader drop zone (~30-50 at a time).
      Each filename becomes the emoji name.
-  4. Try  :coffeeparrot:  :noto_pizza:  :blob_thumbsup:  in any channel 🎉
+  4. Try  :coffeeparrot:  :noto_pizza:  :blob_octopus:  :fluent_rocket:  in any channel 🎉
 
 (Don't upload ATTRIBUTION.txt — it's just the license credit.)
 EOF
