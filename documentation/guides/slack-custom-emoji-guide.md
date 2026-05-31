@@ -197,8 +197,12 @@ The script also handles **skin-tone variants** (`noto_thumbsup_dark_skin`), de-d
 collisions, keeps everything ≤128KB, auto-compresses oversized GIFs with `gifsicle` if present,
 and writes an `ATTRIBUTION.txt` (don't upload that one).
 
-Then install the **Slack Emoji Tools** browser extension, open `/customize/emoji`, and drag the
-folder onto the bulk uploader (~30–50 at a time). Each filename becomes the emoji name.
+**Batching:** output is split into `batch-01/`, `batch-02/`, … folders of **500 emoji each**, so
+you drag one folder's contents per upload round. Change the size with `BATCH_SIZE=250 ...`, or
+disable with `BATCH_SIZE=0` for a single flat folder. (`ATTRIBUTION.txt` stays at the top level.)
+
+Then install the **Slack Emoji Tools** browser extension, open `/customize/emoji`, and drag one
+**`batch-NN/`** folder at a time onto the bulk uploader. Each filename becomes the emoji name.
 
 ### Full rollout plan (if hand-picking more packs)
 

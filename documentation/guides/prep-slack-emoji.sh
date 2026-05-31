@@ -38,6 +38,7 @@ PACKS="${PACKS:-parrots noto blobmoji fluent}"
 WORK_DIR="${WORK_DIR:-$(pwd)/.slack-emoji-src}"   # cache for cloned packs
 OUT_DIR="${OUT_DIR:-$(pwd)/slack-emoji-upload}"   # the drag-and-drop folder
 ADD_DIR="${ADD_DIR:-}"                            # optional: your own images
+BATCH_SIZE="${BATCH_SIZE:-500}"                   # split output into batch-NN/ folders (0 = off)
 MAX_BYTES=131072                                  # Slack hard limit = 128 KB
 NOTO_PREFIX="${NOTO_PREFIX-noto_}"                 # prefixes (avoid native clashes)
 BLOB_PREFIX="${BLOB_PREFIX-blob_}"
@@ -117,6 +118,22 @@ emit_gif() {
       warn "$(basename "$dest") >128KB and gifsicle missing; removing"; rm -f "$dest"
     fi
   fi
+}
+
+# split the flat output into batch-NN/ subfolders of <size> files each, so you can
+# drag one folder per upload round. Prints the number of batches created.
+batch_split() {
+  local size="$1" total n=0 b=0 dir f
+  [ "$size" -gt 0 ] 2>/dev/null || { echo 0; return; }
+  total=$(find "$OUT_DIR" -maxdepth 1 -type f ! -name ATTRIBUTION.txt | wc -l)
+  [ "$total" -gt "$size" ] || { echo 0; return; }   # one batch — leave flat
+  while IFS= read -r -d '' f; do
+    if [ $((n % size)) -eq 0 ]; then
+      b=$((b + 1)); dir="$(printf '%s/batch-%02d' "$OUT_DIR" "$b")"; mkdir -p "$dir"
+    fi
+    mv "$f" "$dir/"; n=$((n + 1))
+  done < <(find "$OUT_DIR" -maxdepth 1 -type f ! -name ATTRIBUTION.txt -print0 | sort -z)
+  echo "$b"
 }
 
 # drop/shrink any mapped PNGs that ended up over 128KB (rare at 128px).
@@ -219,16 +236,25 @@ Keep this credit where CC-BY-SA / attribution-required assets are used.
 EOF
 
 final=$(find "$OUT_DIR" -type f ! -name ATTRIBUTION.txt | wc -l | tr -d ' ')
+batches=$(batch_split "$BATCH_SIZE")
 echo
 ok "Done — $final emoji ready in: $OUT_DIR"
 [ "$HAVE_GIFSICLE" -eq 0 ] && warn "gifsicle not installed (only needed if you add oversized GIFs)."
+
+if [ "$batches" -gt 0 ]; then
+  ok "Split into $batches folders of up to $BATCH_SIZE: $OUT_DIR/batch-01 … batch-$(printf '%02d' "$batches")"
+  drag_hint="Drag the contents of one  batch-NN/  folder per upload round (each = up to $BATCH_SIZE emoji)."
+else
+  drag_hint="Drag files from  $OUT_DIR  onto the drop zone (~30-50 at a time)."
+fi
+
 cat <<EOF
 
 Next steps (the easy bulk-upload route):
   1. Install the browser extension "Slack Emoji Tools" (Chrome) /
      "Neutral Face Emoji Tools" (Firefox): https://github.com/takempf/neutral-face-emoji-tools
   2. Open  https://<yourworkspace>.slack.com/customize/emoji
-  3. Drag files from  $OUT_DIR  onto the bulk-uploader drop zone (~30-50 at a time).
+  3. $drag_hint
      Each filename becomes the emoji name.
   4. Try  :coffeeparrot:  :noto_pizza:  :blob_octopus:  :fluent_rocket:  in any channel 🎉
 
